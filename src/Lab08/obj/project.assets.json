@@ -330,11 +330,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\Kirill\\source\\repos\\mod-lab08-server\\src\\Lab08\\Lab08.csproj",
+      "projectUniqueName": "C:\\Users\\Kirill\\Source\\Repos\\mod-lab08-server\\src\\Lab08\\Lab08.csproj",
       "projectName": "Lab08",
-      "projectPath": "C:\\Users\\Kirill\\source\\repos\\mod-lab08-server\\src\\Lab08\\Lab08.csproj",
+      "projectPath": "C:\\Users\\Kirill\\Source\\Repos\\mod-lab08-server\\src\\Lab08\\Lab08.csproj",
       "packagesPath": "C:\\Users\\Kirill\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\Kirill\\source\\repos\\mod-lab08-server\\src\\Lab08\\obj\\",
+      "outputPath": "C:\\Users\\Kirill\\Source\\Repos\\mod-lab08-server\\src\\Lab08\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

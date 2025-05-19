@@ -1,76 +1,76 @@
 ﻿using System;
-using System.Linq;
+using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using OxyPlot;
 using OxyPlot.ImageSharp;
 using OxyPlot.Series;
-using OxyPlot;
 
 public class Server
 {
     private readonly bool[] channels;
-    private readonly object lockObject = new object();
+    private readonly object lockObj = new object();
     private readonly double mu;
     private int totalRequests;
     private int handledRequests;
     private int rejectedRequests;
     private double totalProcessingTime;
-    private DateTime simulationStartTime;
-    private DateTime simulationEndTime;
+    private DateTime simulationStart;
+    private DateTime simulationEnd;
     private double idleTime;
-    private bool[] previousChannelState;
-    private DateTime lastUpdateTime;
+    private bool[] prevChannelState;
+    private DateTime lastUpdate;
 
     public Server(int channelCount, double mu)
     {
         this.mu = mu;
         channels = new bool[channelCount];
-        previousChannelState = new bool[channelCount];
+        prevChannelState = new bool[channelCount];
     }
 
     public int TotalRequests => totalRequests;
     public int HandledRequests => handledRequests;
     public int RejectedRequests => rejectedRequests;
     public double TotalProcessingTime => totalProcessingTime;
-    public TimeSpan SimulationDuration => simulationEndTime - simulationStartTime;
+    public TimeSpan SimulationTime => simulationEnd - simulationStart;
     public double IdleTime => idleTime;
 
     public void StartSimulation()
     {
-        simulationStartTime = DateTime.Now;
-        lastUpdateTime = simulationStartTime;
-        previousChannelState = new bool[channels.Length];
+        simulationStart = DateTime.Now;
+        lastUpdate = simulationStart;
+        prevChannelState = new bool[channels.Length];
         idleTime = 0;
     }
 
     public void StopSimulation()
     {
-        simulationEndTime = DateTime.Now;
-        UpdateIdleTime();
+        simulationEnd = DateTime.Now;
+        UpdateIdle();
     }
 
-    private void UpdateIdleTime()
+    private void UpdateIdle()
     {
-        lock (lockObject)
+        lock (lockObj)
         {
             DateTime now = DateTime.Now;
-            double elapsed = (now - lastUpdateTime).TotalSeconds;
+            double elapsed = (now - lastUpdate).TotalSeconds;
 
-            bool wasIdle = previousChannelState.All(c => !c);
-            if (wasIdle)
-                idleTime += elapsed;
+            bool wasIdle = Array.TrueForAll(prevChannelState, c => !c);
+            if (wasIdle) idleTime += elapsed;
 
-            lastUpdateTime = now;
-            previousChannelState = channels.ToArray();
+            lastUpdate = now;
+            Array.Copy(channels, prevChannelState, channels.Length);
         }
     }
 
     public void HandleRequest(object sender, EventArgs e)
     {
         Interlocked.Increment(ref totalRequests);
-        lock (lockObject)
+        lock (lockObj)
         {
-            UpdateIdleTime();
+            UpdateIdle();
 
             for (int i = 0; i < channels.Length; i++)
             {
@@ -86,17 +86,16 @@ public class Server
         }
     }
 
-    private void ProcessRequest(int channelIndex)
+    private void ProcessRequest(int channelIdx)
     {
         DateTime start = DateTime.Now;
-        double processingTime = GenerateExponential(mu);
-        int delay = (int)(processingTime * 1000);
-        Thread.Sleep(delay);
+        double delay = GenerateExponential(mu);
+        Thread.Sleep((int)(delay * 1000));
 
-        lock (lockObject)
+        lock (lockObj)
         {
-            UpdateIdleTime();
-            channels[channelIndex] = false;
+            UpdateIdle();
+            channels[channelIdx] = false;
             totalProcessingTime += (DateTime.Now - start).TotalSeconds;
         }
     }
@@ -104,28 +103,28 @@ public class Server
     private double GenerateExponential(double rate)
     {
         Random rand = new Random(Guid.NewGuid().GetHashCode());
-        double u = rand.NextDouble();
-        return -Math.Log(1 - u) / rate;
+        return -Math.Log(1 - rand.NextDouble()) / rate;
     }
 }
+
 public class Client
 {
     private readonly double lambda;
-    private volatile bool isRunning;
+    private volatile bool running;
     public event EventHandler RequestGenerated;
 
     public Client(double lambda)
     {
         this.lambda = lambda;
-        isRunning = false;
+        running = false;
     }
 
     public void Start()
     {
-        isRunning = true;
+        running = true;
         Task.Run(() =>
         {
-            while (isRunning)
+            while (running)
             {
                 double interval = GenerateExponential(lambda);
                 Thread.Sleep((int)(interval * 1000));
@@ -134,19 +133,14 @@ public class Client
         });
     }
 
-    public void Stop()
-    {
-        isRunning = false;
-    }
+    public void Stop() => running = false;
 
     private double GenerateExponential(double rate)
     {
         Random rand = new Random(Guid.NewGuid().GetHashCode());
-        double u = rand.NextDouble();
-        return -Math.Log(1 - u) / rate;
+        return -Math.Log(1 - rand.NextDouble()) / rate;
     }
 }
-
 
 class Program
 {
@@ -154,11 +148,11 @@ class Program
     {
         int n = 3; // Количество каналов
         double mu = 1.0; // Интенсивность обслуживания
-        double[] lambdas = new double[] { 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0 }; // Интенсивности входного потока
+        double[] lambdas = { 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0 };
 
-        List<SimulationDataPoint> results = new List<SimulationDataPoint>();
+        var results = new List<SimDataPoint>();
 
-        foreach (double lambda in lambdas)
+        foreach (var lambda in lambdas)
         {
             var server = new Server(n, mu);
             var client = new Client(lambda);
@@ -166,24 +160,48 @@ class Program
 
             server.StartSimulation();
             client.Start();
-            Thread.Sleep(30000); // 30 секунд симуляции
+            Thread.Sleep(30000); // 30 секунд моделирования
             client.Stop();
             server.StopSimulation();
 
-            double expP0 = server.IdleTime / server.SimulationDuration.TotalSeconds;
-            double theoryP0 = CalculateTheoreticalP0(lambda, mu, n);
-            results.Add(new SimulationDataPoint
-            {
-                Lambda = lambda,
-                ExperimentalP0 = expP0,
-                TheoreticalP0 = theoryP0
-            });
+            // Экспериментальные значения
+            double expP0 = server.IdleTime / server.SimulationTime.TotalSeconds;
+            double expPreject = (double)server.RejectedRequests / server.TotalRequests;
+            double expQ = 1 - expPreject;
+            double expA = lambda * expQ;
+            double expN = (lambda / mu) * expQ;
+
+            // Теоретические значения
+            double theoryP0 = CalcTheoryP0(lambda, mu, n);
+            double theoryPreject = CalcTheoryPreject(lambda, mu, n);
+            double theoryQ = 1 - theoryPreject;
+            double theoryA = lambda * theoryQ;
+            double theoryN = (lambda / mu) * theoryQ;
+
+            results.Add(new SimDataPoint(
+                lambda,
+                expP0, theoryP0,
+                expPreject, theoryPreject,
+                expQ, theoryQ,
+                expA, theoryA,
+                expN, theoryN
+            ));
         }
 
-        GeneratePlot(results, "p-1.png", "Вероятность простоя");
+        // Генерация графиков
+        GeneratePlot(results, "p-1.png", "Вероятность простоя",
+            p => p.ExpP0, p => p.TheoryP0);
+        GeneratePlot(results, "p-2.png", "Вероятность отказа",
+            p => p.ExpPreject, p => p.TheoryPreject);
+        GeneratePlot(results, "p-3.png", "Относительная пропускная способность",
+            p => p.ExpQ, p => p.TheoryQ);
+        GeneratePlot(results, "p-4.png", "Абсолютная пропускная способность",
+            p => p.ExpA, p => p.TheoryA);
+        GeneratePlot(results, "p-5.png", "Среднее число занятых каналов",
+            p => p.ExpN, p => p.TheoryN);
     }
 
-    static double CalculateTheoreticalP0(double lambda, double mu, int n)
+    static double CalcTheoryP0(double lambda, double mu, int n)
     {
         double rho = lambda / mu;
         double sum = 0;
@@ -192,37 +210,41 @@ class Program
         return 1 / sum;
     }
 
-    static double Factorial(int k)
+    static double CalcTheoryPreject(double lambda, double mu, int n)
     {
-        return k <= 1 ? 1 : k * Factorial(k - 1);
+        double rho = lambda / mu;
+        return (Math.Pow(rho, n) / Factorial(n)) * CalcTheoryP0(lambda, mu, n);
     }
 
-    static void GeneratePlot(List<SimulationDataPoint> data, string filename, string title)
+    static double Factorial(int k) => k <= 1 ? 1 : k * Factorial(k - 1);
+
+    static void GeneratePlot(List<SimDataPoint> data, string filename, string title,
+        Func<SimDataPoint, double> expSelector, Func<SimDataPoint, double> theorySelector)
     {
-        var plotModel = new PlotModel { Title = title };
-        var expSeries = new LineSeries { Title = "Экспериментальная" };
-        var theorySeries = new LineSeries { Title = "Теоретическая" };
+        var model = new PlotModel { Title = title };
+        var expLine = new LineSeries { Title = "Эксперимент" };
+        var theoryLine = new LineSeries { Title = "Теория" };
 
         foreach (var point in data)
         {
-            // Используем DataPoint из OxyPlot с конструктором (x, y)
-            expSeries.Points.Add(new OxyPlot.DataPoint(point.Lambda, point.ExperimentalP0));
-            theorySeries.Points.Add(new OxyPlot.DataPoint(point.Lambda, point.TheoreticalP0));
+            expLine.Points.Add(new DataPoint(point.Lambda, expSelector(point)));
+            theoryLine.Points.Add(new DataPoint(point.Lambda, theorySelector(point)));
         }
 
-        plotModel.Series.Add(expSeries);
-        plotModel.Series.Add(theorySeries);
+        model.Series.Add(expLine);
+        model.Series.Add(theoryLine);
 
-        var exporter = new PngExporter (800, 600);
+        var exporter = new PngExporter(800,600);
         using (var stream = File.Create(Path.Combine("..//..//..//..//..//result", filename)))
-            exporter.Export(plotModel, stream);
+            exporter.Export(model, stream);
     }
 }
 
-class SimulationDataPoint
-{
-    public double Lambda { get; set; }
-    public double ExperimentalP0 { get; set; }
-    public double TheoreticalP0 { get; set; }
-    // Другие показатели
-}
+record SimDataPoint(
+    double Lambda,
+    double ExpP0, double TheoryP0,
+    double ExpPreject, double TheoryPreject,
+    double ExpQ, double TheoryQ,
+    double ExpA, double TheoryA,
+    double ExpN, double TheoryN
+);
